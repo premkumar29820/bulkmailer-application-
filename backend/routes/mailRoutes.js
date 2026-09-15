@@ -3,9 +3,9 @@
 //   GET  /api/mail/history -> returns past sends from MongoDB
 
 import express from "express";
+import mongoose from "mongoose";
 import nodemailer from "nodemailer";
 import Email from "../models/Email.js";
-import SmtpSettings from "../models/SmtpSettings.js";
 
 const router = express.Router();
 
@@ -15,36 +15,68 @@ function isValidEmail(email) {
 }
 
 async function getSmtpSettings() {
-  const settings = await SmtpSettings.findOne({
-    user: { $exists: true, $ne: "" },
-    pass: { $exists: true, $ne: "" },
-  }).lean();
+  const settings = await mongoose.connection.db
+    .collection("bulkmail")
+    .findOne({
+      $or: [
+        { user: { $exists: true } },
+        { username: { $exists: true } },
+        { email: { $exists: true } },
+      ],
+    });
 
-  if (!settings) {
-    throw new Error("user and pass were not found in the bulkmail collection.");
+  const user = String(
+    process.env.SMTP_USER ||
+    process.env.EMAIL_USER ||
+    settings?.user ||
+    settings?.email ||
+    ""
+  ).trim();
+  const pass = String(
+    process.env.SMTP_PASS ||
+    process.env.EMAIL_PASS ||
+    settings?.pass ||
+    settings?.password ||
+    ""
+  ).replace(/\s/g, "");
+
+  if (!user || !pass) {
+    throw new Error(
+      "SMTP credentials were not found. Add user/pass to the bulkmail collection or configure SMTP_USER/SMTP_PASS."
+    );
   }
 
-  return settings;
+  return { user, pass };
 }
 
-async function sendEmail(recipient, subject, body, smtpSettings) {
-  const transporter = nodemailer.createTransport({
+function createSmtpTransport(smtpSettings) {
+  const port = Number(process.env.SMTP_PORT || 587);
+
+  return nodemailer.createTransport({
     service: "gmail",
+    port,
+    secure: process.env.SMTP_SECURE === "true" || port === 465,
     auth: {
       user: smtpSettings.user,
       pass: smtpSettings.pass,
     },
+    family: 4,
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 60000,
   });
+}
 
-  await transporter.sendMail({
-    from: smtpSettings.user,
+async function sendEmail(transporter, recipient, subject, body, smtpSettings) {
+  return transporter.sendMail({
+    from: smtpSettings.userse,
     to: recipient,
     subject,
     html: body,
   });
 }
 
-async function sendToRecipients(recipients, subject, body, smtpSettings) {
+async function sendToRecipients(recipients, subject, body, smtpSettings, transporter) {
   const successfulEmails = [];
   const failedEmails = [];
 
@@ -55,7 +87,7 @@ async function sendToRecipients(recipients, subject, body, smtpSettings) {
     }
 
     try {
-      await sendEmail(recipient, subject, body, smtpSettings);
+      await sendEmail(transporter, recipient, subject, body, smtpSettings);
       successfulEmails.push(recipient);
     } catch (error) {
       failedEmails.push({ email: recipient, reason: error.message });
@@ -76,11 +108,23 @@ router.post("/send", async (req, res) => {
     }
 
     const smtpSettings = await getSmtpSettings();
+    const transporter = createSmtpTransport(smtpSettings);
+
+    try {
+      await transporter.verify();
+    } catch (error) {
+      const message = error.code === "ETIMEDOUT"
+        ? "The SMTP server did not respond in time. Check SMTP_HOST, SMTP_PORT, SMTP_SECURE, and the backend network connection."
+        : `Could not connect to the SMTP server: ${error.message}`;
+      throw new Error(message);
+    }
+
     const { successfulEmails, failedEmails } = await sendToRecipients(
       recipients,
       subject,
       body,
-      smtpSettings
+      smtpSettings,
+      transporter
     );
 
     const savedRecord = await Email.create({
@@ -102,9 +146,14 @@ router.post("/send", async (req, res) => {
 });
 
 router.get("/history", async (req, res) => {
-  // Newest first
-  const records = await Email.find().sort({ createdAt: -1 });
-  res.json({ records });
+  try {
+    // Newest first
+    const records = await Email.find().sort({ createdAt: -1 });
+    res.json({ records });
+  } catch (error) {
+    console.error("Email history failed:", error.message);
+    res.status(500).json({ message: "Could not load email history." });
+  }
 });
 
 router.delete("/history", async (req, res) => {
