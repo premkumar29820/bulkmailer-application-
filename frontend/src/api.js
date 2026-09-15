@@ -4,24 +4,14 @@
 
 import axios from "axios";
 
-const apiUrl = "https://bulkmailer-application.onrender.com";
-
-if (!apiUrl) {
-  throw new Error("REACT_APP_API_URL is not configured.");
-}
-
-const BASE_URL = `${apiUrl.replace(/\/$/, "")}/api`;
+const BASE_URL = 'https://bulkmailer-application.onrender.com/api';
 
 export function login(email, password) {
   return axios.post(`${BASE_URL}/auth/login`, { email, password });
 }
 
-export function sendBulkMail(subject, body, recipients, signal) {
-  return axios.post(
-    `${BASE_URL}/mail/send`,
-    { subject, body, recipients },
-    { signal }
-  );
+export function sendBulkMail(subject, body, recipients) {
+  return axios.post(`${BASE_URL}/mail/send`, { subject, body, recipients });
 }
 
 export function getHistory() {
