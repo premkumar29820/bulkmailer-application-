@@ -4,7 +4,7 @@
 
 import axios from "axios";
 
-const apiUrl = "http://localhost:5000";
+const apiUrl = "https://bulkmailer-application.onrender.com";
 
 if (!apiUrl) {
   throw new Error("REACT_APP_API_URL is not configured.");
