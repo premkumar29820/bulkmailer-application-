@@ -3,7 +3,6 @@
 //   GET  /api/mail/history -> returns past sends from MongoDB
 
 import express from "express";
-import mongoose from "mongoose";
 import nodemailer from "nodemailer";
 import Email from "../models/Email.js";
 
@@ -14,53 +13,27 @@ function isValidEmail(email) {
   return /^\S+@\S+\.\S+$/.test(email);
 }
 
-async function getSmtpSettings() {
-  const settings = await mongoose.connection.db
-    .collection("bulkmail")
-    .findOne({
-      $or: [
-        { user: { $exists: true } },
-        { username: { $exists: true } },
-        { email: { $exists: true } },
-      ],
-    });
-
-  const user = String(
-    process.env.SMTP_USER ||
-    process.env.EMAIL_USER ||
-    settings?.user ||
-    settings?.email ||
-    ""
-  ).trim();
-  const pass = String(
-    process.env.SMTP_PASS ||
-    process.env.EMAIL_PASS ||
-    settings?.pass ||
-    settings?.password ||
-    ""
-  ).replace(/\s/g, "");
+function getSmtpSettings() {
+  const user = String(process.env.SMTP_USER || "").trim();
+  const pass = String(process.env.SMTP_PASS || "").trim();
 
   if (!user || !pass) {
-    throw new Error(
-      "SMTP credentials were not found. Add user/pass to the bulkmail collection or configure SMTP_USER/SMTP_PASS."
-    );
+    throw new Error("SMTP_USER and SMTP_PASS must be configured on the backend.");
   }
 
   return { user, pass };
 }
 
 function createSmtpTransport(smtpSettings) {
-  const port = Number(process.env.SMTP_PORT || 587);
-
   return nodemailer.createTransport({
-    service: "gmail",
-    port,
-    secure: process.env.SMTP_SECURE === "true" || port === 465,
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false,
+    requireTLS: true,
     auth: {
       user: smtpSettings.user,
       pass: smtpSettings.pass,
     },
-    family: 4,
     connectionTimeout: 30000,
     greetingTimeout: 30000,
     socketTimeout: 60000,
@@ -69,7 +42,7 @@ function createSmtpTransport(smtpSettings) {
 
 async function sendEmail(transporter, recipient, subject, body, smtpSettings) {
   return transporter.sendMail({
-    from: smtpSettings.userse,
+    from: smtpSettings.user,
     to: recipient,
     subject,
     html: body,
@@ -107,7 +80,7 @@ router.post("/send", async (req, res) => {
       });
     }
 
-    const smtpSettings = await getSmtpSettings();
+    const smtpSettings = getSmtpSettings();
     const transporter = createSmtpTransport(smtpSettings);
 
     try {
@@ -146,14 +119,9 @@ router.post("/send", async (req, res) => {
 });
 
 router.get("/history", async (req, res) => {
-  try {
-    // Newest first
-    const records = await Email.find().sort({ createdAt: -1 });
-    res.json({ records });
-  } catch (error) {
-    console.error("Email history failed:", error.message);
-    res.status(500).json({ message: "Could not load email history." });
-  }
+  // Newest first
+  const records = await Email.find().sort({ createdAt: -1 });
+  res.json({ records });
 });
 
 router.delete("/history", async (req, res) => {
