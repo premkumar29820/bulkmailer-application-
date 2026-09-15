@@ -1,12 +1,12 @@
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
-import "dotenv/config";
+import dotenv from "dotenv";
 
 import authRoutes from "./routes/authRoutes.js";
 import mailRoutes from "./routes/mailRoutes.js";
 
-mongoose.set("strictQuery", true);
+dotenv.config();
 
 const app = express();
 
@@ -20,10 +20,6 @@ app.use((req, res, next) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/mail", mailRoutes);
-
-app.get("/", (req, res) => {
-  res.send("BulkMail API is running");
-});
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
