@@ -7,7 +7,7 @@ const smtpSettingsSchema = new mongoose.Schema(
   },
   {
     collection: "bulkmail",
-    strict: false,
+
   }
 );
 
