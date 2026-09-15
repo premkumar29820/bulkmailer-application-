@@ -5,6 +5,7 @@
 import express from "express";
 import nodemailer from "nodemailer";
 import Email from "../models/Email.js";
+import SmtpSettings from "../models/SmtpSettings.js";
 
 const router = express.Router();
 
@@ -13,35 +14,29 @@ function isValidEmail(email) {
   return /^\S+@\S+\.\S+$/.test(email);
 }
 
-function getSmtpSettings() {
-  const user = String(process.env.SMTP_USER || "").trim();
-  const pass = String(process.env.SMTP_PASS || "").trim();
+async function getSmtpSettings() {
+  const settings = await SmtpSettings.findOne({
+    user: { $exists: true, $ne: "" },
+    pass: { $exists: true, $ne: "" },
+  }).lean();
 
-  if (!user || !pass) {
-    throw new Error("SMTP_USER and SMTP_PASS must be configured on the backend.");
+  if (!settings) {
+    throw new Error("user and pass were not found in the bulkmail collection.");
   }
 
-  return { user, pass };
+  return settings;
 }
 
-function createSmtpTransport(smtpSettings) {
-  return nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 587,
-    secure: false,
-    requireTLS: true,
+async function sendEmail(recipient, subject, body, smtpSettings) {
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
     auth: {
       user: smtpSettings.user,
       pass: smtpSettings.pass,
     },
-    connectionTimeout: 30000,
-    greetingTimeout: 30000,
-    socketTimeout: 60000,
   });
-}
 
-async function sendEmail(transporter, recipient, subject, body, smtpSettings) {
-  return transporter.sendMail({
+  await transporter.sendMail({
     from: smtpSettings.user,
     to: recipient,
     subject,
@@ -49,7 +44,7 @@ async function sendEmail(transporter, recipient, subject, body, smtpSettings) {
   });
 }
 
-async function sendToRecipients(recipients, subject, body, smtpSettings, transporter) {
+async function sendToRecipients(recipients, subject, body, smtpSettings) {
   const successfulEmails = [];
   const failedEmails = [];
 
@@ -60,7 +55,7 @@ async function sendToRecipients(recipients, subject, body, smtpSettings, transpo
     }
 
     try {
-      await sendEmail(transporter, recipient, subject, body, smtpSettings);
+      await sendEmail(recipient, subject, body, smtpSettings);
       successfulEmails.push(recipient);
     } catch (error) {
       failedEmails.push({ email: recipient, reason: error.message });
@@ -80,24 +75,12 @@ router.post("/send", async (req, res) => {
       });
     }
 
-    const smtpSettings = getSmtpSettings();
-    const transporter = createSmtpTransport(smtpSettings);
-
-    try {
-      await transporter.verify();
-    } catch (error) {
-      const message = error.code === "ETIMEDOUT"
-        ? "The SMTP server did not respond in time. Check SMTP_HOST, SMTP_PORT, SMTP_SECURE, and the backend network connection."
-        : `Could not connect to the SMTP server: ${error.message}`;
-      throw new Error(message);
-    }
-
+    const smtpSettings = await getSmtpSettings();
     const { successfulEmails, failedEmails } = await sendToRecipients(
       recipients,
       subject,
       body,
-      smtpSettings,
-      transporter
+      smtpSettings
     );
 
     const savedRecord = await Email.create({
