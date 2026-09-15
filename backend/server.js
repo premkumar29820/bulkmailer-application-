@@ -1,7 +1,7 @@
 import express from "express";
+import mongoose from "mongoose";
 import cors from "cors";
 import dotenv from "dotenv";
-import mongoose from "mongoose";
 
 import authRoutes from "./routes/authRoutes.js";
 import mailRoutes from "./routes/mailRoutes.js";
@@ -10,62 +10,34 @@ dotenv.config();
 
 const app = express();
 
-// ==================================================
-// CORS
-// ==================================================
-
-const corsOptions = {
-  origin: "https://bulkmailer-application.vercel.app/",
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true,
-};
-
-app.use(cors(corsOptions));
-
-// ==================================================
-// Middleware
-// ==================================================
-
+app.use(cors({ origin: process.env.CLIENT_ORIGIN }));
 app.use(express.json());
 
-// ==================================================
-// MongoDB
-// ==================================================
-
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => {
-    console.log("MongoDB connected");
-  })
-  .catch((error) => {
-    console.error("MongoDB connection failed:", error);
-  });
-
-// ==================================================
-// Routes
-// ==================================================
+app.use((req, res, next) => {
+  console.log(req.method, req.url);
+  next();
+});
 
 app.use("/api/auth", authRoutes);
 app.use("/api/mail", mailRoutes);
 
-// ==================================================
-// Health check
-// ==================================================
-
-app.get("/", (req, res) => {
-  res.json({
-    success: true,
-    message: "Backend server is running",
-  });
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok" });
 });
-
-// ==================================================
-// PORT
-// ==================================================
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+async function startServer() {
+  try {
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log("Connected to MongoDB");
+
+    app.listen(PORT, () => {
+      console.log(`Server running at http://localhost:${PORT}`);
+    });
+  } catch (error) {
+    console.log("Could not connect to MongoDB:", error.message);
+  }
+}
+
+startServer();
