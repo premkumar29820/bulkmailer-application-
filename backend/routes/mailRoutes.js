@@ -1,7 +1,3 @@
-// This file has two routes:
-//   POST /api/mail/send    -> sends the bulk email
-//   GET  /api/mail/history -> returns past sends from MongoDB
-
 import express from "express";
 import nodemailer from "nodemailer";
 import Email from "../models/Email.js";
@@ -9,81 +5,122 @@ import SmtpSettings from "../models/SmtpSettings.js";
 
 const router = express.Router();
 
-// A simple check to see if a string looks like an email address
-function isValidEmail(email) {
-  return /^\S+@\S+\.\S+$/.test(email);
-}
-
-async function getSmtpSettings() {
-  const settings = await SmtpSettings.findOne({
-    user: { $exists: true, $ne: "" },
-    pass: { $exists: true, $ne: "" },
-  }).lean();
-
-  if (!settings) {
-    throw new Error("user and pass were not found in the bulkmail collection.");
-  }
-
-  return settings;
-}
-
-async function sendEmail(recipient, subject, body, smtpSettings) {
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: smtpSettings.user,
-      pass: smtpSettings.pass,
-    },
-  });
-
-  await transporter.sendMail({
-    from: smtpSettings.user,
-    to: recipient,
-    subject,
-    html: body,
-  });
-}
-
-async function sendToRecipients(recipients, subject, body, smtpSettings) {
-  const successfulEmails = [];
-  const failedEmails = [];
-
-  for (const recipient of recipients) {
-    if (!isValidEmail(recipient)) {
-      failedEmails.push({ email: recipient, reason: "Not a valid email address" });
-      continue;
-    }
-
-    try {
-      await sendEmail(recipient, subject, body, smtpSettings);
-      successfulEmails.push(recipient);
-    } catch (error) {
-      failedEmails.push({ email: recipient, reason: error.message });
-    }
-  }
-
-  return { successfulEmails, failedEmails };
-}
+// ==================================================
+// POST /api/mail/send
+// Send bulk emails
+// ==================================================
 
 router.post("/send", async (req, res) => {
   try {
     const { subject, body, recipients } = req.body;
 
-    if (!subject || !body || !Array.isArray(recipients) || recipients.length === 0) {
+    // ------------------------------------------------
+    // Validate request
+    // ------------------------------------------------
+
+    if (!subject || !body || !Array.isArray(recipients)) {
       return res.status(400).json({
-        message: "Please fill in subject, body, and at least one recipient.",
+        success: false,
+        message: "Subject, body and recipients are required",
       });
     }
 
-    const smtpSettings = await getSmtpSettings();
-    const { successfulEmails, failedEmails } = await sendToRecipients(
-      recipients,
-      subject,
-      body,
-      smtpSettings
-    );
+    if (recipients.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Recipient list is empty",
+      });
+    }
 
-    const savedRecord = await Email.create({
+    console.log("POST /api/mail/send");
+    console.log("Getting SMTP settings...");
+
+    // ------------------------------------------------
+    // Get SMTP credentials from MongoDB
+    // ------------------------------------------------
+
+    const settings = await SmtpSettings.findOne();
+
+    if (!settings) {
+      return res.status(400).json({
+        success: false,
+        message: "SMTP settings not found",
+      });
+    }
+
+    if (!settings.email || !settings.password) {
+      return res.status(400).json({
+        success: false,
+        message: "SMTP email/password not found",
+      });
+    }
+
+    console.log("Using SMTP account:", settings.email);
+
+    // ------------------------------------------------
+    // Create Gmail transporter
+    // ------------------------------------------------
+
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+
+      auth: {
+        user: settings.email,
+        pass: settings.password,
+      },
+
+      connectionTimeout: 30000,
+      greetingTimeout: 30000,
+      socketTimeout: 30000,
+    });
+
+    // ------------------------------------------------
+    // Test SMTP connection
+    // ------------------------------------------------
+
+    console.log("Testing SMTP connection...");
+
+    await transporter.verify();
+
+    console.log("SMTP connection successful");
+
+    // ------------------------------------------------
+    // Send emails
+    // ------------------------------------------------
+
+    const successfulEmails = [];
+    const failedEmails = [];
+
+    for (const recipient of recipients) {
+      try {
+        await transporter.sendMail({
+          from: settings.email,
+          to: recipient,
+          subject: subject,
+          text: body,
+        });
+
+        console.log(`Email sent to ${recipient}`);
+
+        successfulEmails.push(recipient);
+      } catch (error) {
+        console.error(
+          `Failed to send email to ${recipient}:`,
+          error.message
+        );
+
+        failedEmails.push({
+          email: recipient,
+          reason: error.message,
+        });
+      }
+    }
+
+    // ------------------------------------------------
+    // Save email history
+    // ------------------------------------------------
+
+    await Email.create({
       subject,
       body,
       recipients,
@@ -91,42 +128,52 @@ router.post("/send", async (req, res) => {
       failedEmails,
     });
 
-    res.json({
-      message: `${successfulEmails.length} sent, ${failedEmails.length} failed.`,
-      record: savedRecord,
+    // ------------------------------------------------
+    // Send response
+    // ------------------------------------------------
+
+    return res.status(200).json({
+      success: true,
+      message: "Bulk email process completed",
+
+      total: recipients.length,
+      successful: successfulEmails.length,
+      failed: failedEmails.length,
+
+      successfulEmails,
+      failedEmails,
     });
   } catch (error) {
-    console.error("Mail send failed:", error.message);
-    res.status(500).json({ message: error.message || "Could not send the email." });
+    console.error("Mail send failed:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 });
+
+// ==================================================
+// GET /api/mail/history
+// Get email history
+// ==================================================
 
 router.get("/history", async (req, res) => {
-  // Newest first
-  const records = await Email.find().sort({ createdAt: -1 });
-  res.json({ records });
-});
-
-router.delete("/history", async (req, res) => {
   try {
-    await Email.deleteMany({});
-    res.json({ message: "Email history cleared." });
+    console.log("GET /api/mail/history");
+
+    const emails = await Email.find().sort({
+      createdAt: -1,
+    });
+
+    return res.status(200).json(emails);
   } catch (error) {
-    res.status(500).json({ message: "Could not clear email history." });
-  }
-});
+    console.error("History error:", error);
 
-router.delete("/history/:id", async (req, res) => {
-  try {
-    const deletedRecord = await Email.findByIdAndDelete(req.params.id);
-
-    if (!deletedRecord) {
-      return res.status(404).json({ message: "History item not found." });
-    }
-
-    res.json({ message: "History item cleared." });
-  } catch (error) {
-    res.status(500).json({ message: "Could not clear history item." });
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 });
 
