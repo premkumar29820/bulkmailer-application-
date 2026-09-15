@@ -4,10 +4,14 @@
 
 import axios from "axios";
 
-const BASE_URL = 'https://bulkmailer-application.onrender.com/api';
+const BASE_URL = "http://localhost:5000/api";
 
 export function login(email, password) {
   return axios.post(`${BASE_URL}/auth/login`, { email, password });
+}
+
+export function signup(email, password) {
+  return axios.post(`${BASE_URL}/auth/signup`, { email, password });
 }
 
 export function sendBulkMail(subject, body, recipients) {
