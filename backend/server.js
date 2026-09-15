@@ -15,7 +15,7 @@ const app = express();
 // ==================================================
 
 const corsOptions = {
-  origin: "https://vercel.com/premkumar2902/bulkmailer-application",
+  origin: "https://bulkmailer-application.vercel.app/",
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
