@@ -1,61 +1,182 @@
-// This file contains helper functions for calling the backend.
+// This file has two routes:
+//   POST /api/mail/send    -> sends the bulk email
+//   GET  /api/mail/history -> returns past sends from MongoDB
 
-import axios from "axios";
+import express from "express";
+import mongoose from "mongoose";
+import nodemailer from "nodemailer";
+import Email from "../models/Email.js";
 
-const BASE_URL =
-  import.meta.env.VITE_API_URL || "https://bulkmailer-application.onrender.com/api";
+const router = express.Router();
 
-// Render free instances cold-start slowly, and a bulk send runs
-// one message at a time, so the send call needs a long leash.
-const SEND_TIMEOUT = 10 * 60 * 1000; // 10 minutes
-const DEFAULT_TIMEOUT = 90 * 1000;   // 90 seconds
+// A simple check to see if a string looks like an email address
+function isValidEmail(email) {
+  return /^\S+@\S+\.\S+$/.test(email);
+}
 
-const api = axios.create({
-  baseURL: BASE_URL,
-  timeout: DEFAULT_TIMEOUT,
-  headers: { "Content-Type": "application/json" },
+async function getSmtpSettings() {
+  const settings = await mongoose.connection.db
+    .collection("bulkmail")
+    .findOne({
+      $or: [
+        { user: { $exists: true } },
+        { username: { $exists: true } },
+        { email: { $exists: true } },
+      ],
+    });
+
+  const user = String(
+    process.env.SMTP_USER ||
+    process.env.EMAIL_USER ||
+    settings?.user ||
+    settings?.email ||
+    ""
+  ).trim();
+  const pass = String(
+    process.env.SMTP_PASS ||
+    process.env.EMAIL_PASS ||
+    settings?.pass ||
+    settings?.password ||
+    ""
+  ).replace(/\s/g, "");
+
+  if (!user || !pass) {
+    throw new Error(
+      "SMTP credentials were not found. Add user/pass to the bulkmail collection or configure SMTP_USER/SMTP_PASS."
+    );
+  }
+
+  return { user, pass };
+}
+
+function createSmtpTransport(smtpSettings) {
+  const port = Number(process.env.SMTP_PORT || 587);
+
+  return nodemailer.createTransport({
+    service: "gmail",
+    port,
+    secure: process.env.SMTP_SECURE === "true" || port === 465,
+    auth: {
+      user: smtpSettings.user,
+      pass: smtpSettings.pass,
+    },
+    family: 4,
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 60000,
+  });
+}
+
+async function sendEmail(transporter, recipient, subject, body, smtpSettings) {
+  return transporter.sendMail({
+    from: smtpSettings.userse,
+    to: recipient,
+    subject,
+    html: body,
+  });
+}
+
+async function sendToRecipients(recipients, subject, body, smtpSettings, transporter) {
+  const successfulEmails = [];
+  const failedEmails = [];
+
+  for (const recipient of recipients) {
+    if (!isValidEmail(recipient)) {
+      failedEmails.push({ email: recipient, reason: "Not a valid email address" });
+      continue;
+    }
+
+    try {
+      await sendEmail(transporter, recipient, subject, body, smtpSettings);
+      successfulEmails.push(recipient);
+    } catch (error) {
+      failedEmails.push({ email: recipient, reason: error.message });
+    }
+  }
+
+  return { successfulEmails, failedEmails };
+}
+
+router.post("/send", async (req, res) => {
+  try {
+    const { subject, body, recipients } = req.body;
+
+    if (!subject || !body || !Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({
+        message: "Please fill in subject, body, and at least one recipient.",
+      });
+    }
+
+    const smtpSettings = await getSmtpSettings();
+    const transporter = createSmtpTransport(smtpSettings);
+
+    try {
+      await transporter.verify();
+    } catch (error) {
+      const message = error.code === "ETIMEDOUT"
+        ? "The SMTP server did not respond in time. Check SMTP_HOST, SMTP_PORT, SMTP_SECURE, and the backend network connection."
+        : `Could not connect to the SMTP server: ${error.message}`;
+      throw new Error(message);
+    }
+
+    const { successfulEmails, failedEmails } = await sendToRecipients(
+      recipients,
+      subject,
+      body,
+      smtpSettings,
+      transporter
+    );
+
+    const savedRecord = await Email.create({
+      subject,
+      body,
+      recipients,
+      successfulEmails,
+      failedEmails,
+    });
+
+    res.json({
+      message: `${successfulEmails.length} sent, ${failedEmails.length} failed.`,
+      record: savedRecord,
+    });
+  } catch (error) {
+    console.error("Mail send failed:", error.message);
+    res.status(500).json({ message: error.message || "Could not send the email." });
+  }
 });
 
-// Turns any axios failure into the message your backend actually sent.
-export function getErrorMessage(error) {
-  if (axios.isCancel(error) || error.code === "ERR_CANCELED") {
-    return "Send cancelled.";
+router.get("/history", async (req, res) => {
+  try {
+    // Newest first
+    const records = await Email.find().sort({ createdAt: -1 });
+    res.json({ records });
+  } catch (error) {
+    console.error("Email history failed:", error.message);
+    res.status(500).json({ message: "Could not load email history." });
   }
-  if (error.code === "ECONNABORTED") {
-    return "The server took too long to respond. It may still be sending — check history.";
+});
+
+router.delete("/history", async (req, res) => {
+  try {
+    await Email.deleteMany({});
+    res.json({ message: "Email history cleared." });
+  } catch (error) {
+    res.status(500).json({ message: "Could not clear email history." });
   }
-  return (
-    error.response?.data?.message ||
-    error.message ||
-    "Something went wrong. Please try again."
-  );
-}
+});
 
-// Login
-export function login(email, password) {
-  return api.post("/auth/login", { email, password });
-}
+router.delete("/history/:id", async (req, res) => {
+  try {
+    const deletedRecord = await Email.findByIdAndDelete(req.params.id);
 
-// Send bulk mail
-export function sendBulkMail(subject, body, recipients, signal) {
-  return api.post(
-    "/mail/send",
-    { subject, body, recipients },
-    { signal, timeout: SEND_TIMEOUT }
-  );
-}
+    if (!deletedRecord) {
+      return res.status(404).json({ message: "History item not found." });
+    }
 
-// Get email history
-export function getHistory(signal) {
-  return api.get("/mail/history", { signal });
-}
+    res.json({ message: "History item cleared." });
+  } catch (error) {
+    res.status(500).json({ message: "Could not clear history item." });
+  }
+});
 
-// Clear all email history
-export function clearHistory() {
-  return api.delete("/mail/history");
-}
-
-// Delete one history item
-export function deleteHistoryItem(id) {
-  return api.delete(`/mail/history/${encodeURIComponent(id)}`);
-}
+export default router;
