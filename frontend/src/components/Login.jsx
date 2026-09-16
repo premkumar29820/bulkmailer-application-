@@ -16,6 +16,7 @@ export default function Login({ onLoginSuccess }) {
     } catch (error) {
       setErrorMessage(
         error.response?.data?.message ||
+          error.message ||
           "Wrong email or password."
       );
     }
@@ -41,7 +42,7 @@ export default function Login({ onLoginSuccess }) {
         <input
           type="email"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(event) => setEmail(event.target.value)}
           className="form-field px-3.5 py-3 mb-4 text-sm"
           placeholder="admin@example.com"
           required
@@ -51,7 +52,7 @@ export default function Login({ onLoginSuccess }) {
         <input
           type="password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(event) => setPassword(event.target.value)}
           className="form-field px-3.5 py-3 mb-4 text-sm"
           placeholder="••••••••"
           required
