@@ -3,5 +3,15 @@
   "framework": "create-react-app",
   "installCommand": "npm install",
   "buildCommand": "npm run build",
-  "outputDirectory": "build"
+  "outputDirectory": "build",
+  "routes": [
+    {
+      "src": "/manifest.json",
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/manifest+json",
+        "Access-Control-Allow-Origin": "*"
+      }
+    }
+  ]
 }
