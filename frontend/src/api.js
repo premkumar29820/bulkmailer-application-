@@ -14,14 +14,23 @@ const api = axios.create({
 });
 
 export function login(email, password) {
-  return api.post("/auth/login", { email, password });
+  return api.post("/auth/login", {
+    email,
+    password,
+  });
 }
 
 export function sendBulkMail(subject, body, recipients, signal) {
   return api.post(
     "/mail/send",
-    { subject, body, recipients },
-    { signal }
+    {
+      subject,
+      body,
+      recipients,
+    },
+    {
+      signal,
+    }
   );
 }
 
