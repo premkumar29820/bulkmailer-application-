@@ -28,9 +28,7 @@ export function sendBulkMail(subject, body, recipients, signal) {
       body,
       recipients,
     },
-    {
-      signal,
-    }
+    { signal }
   );
 }
 
