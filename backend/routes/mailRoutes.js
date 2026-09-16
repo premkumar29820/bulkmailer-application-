@@ -50,12 +50,15 @@ async function getSmtpSettings() {
 }
 
 function createSmtpTransport(smtpSettings) {
+  // Keep this very simple and explicit for gmail:
   const port = Number(process.env.SMTP_PORT || 587);
+  const host = process.env.SMTP_HOST || "smtp.gmail.com";
+  const secure = process.env.SMTP_SECURE === "true" || port === 465;
 
   return nodemailer.createTransport({
-    service: "gmail",
+    host,
     port,
-    secure: process.env.SMTP_SECURE === "true" || port === 465,
+    secure,
     auth: {
       user: smtpSettings.user,
       pass: smtpSettings.pass,
@@ -69,7 +72,7 @@ function createSmtpTransport(smtpSettings) {
 
 async function sendEmail(transporter, recipient, subject, body, smtpSettings) {
   return transporter.sendMail({
-    from: smtpSettings.userse,
+    from: smtpSettings.user,
     to: recipient,
     subject,
     html: body,
