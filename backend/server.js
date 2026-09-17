@@ -17,6 +17,11 @@ mongoose.set("strictQuery", true);
 
 const app = express();
 
+
+// ==================================================
+// CORS CONFIGURATION
+// ==================================================
+
 function normalizeOrigin(origin) {
   return origin.trim().replace(/\/$/, "");
 }
@@ -26,22 +31,40 @@ const configuredOrigins = (process.env.CLIENT_ORIGIN || "")
   .map(normalizeOrigin)
   .filter(Boolean);
 
-const allowedOrigins = new Set([
-  "http://localhost:3000",
-  "https://bulkmailer-2.vercel.app",
-  ...configuredOrigins,
-]);
+const allowedOrigins = new Set(configuredOrigins);
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.has(normalizeOrigin(origin))) {
-      return callback(null, true);
-    }
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests without an origin
+      // such as Postman/server-to-server requests
+      if (!origin) {
+        return callback(null, true);
+      }
 
-    console.warn(`Blocked CORS origin: ${origin}`);
-    return callback(null, false);
-  },
-}));
+      const normalizedOrigin =
+        normalizeOrigin(origin);
+
+      if (
+        allowedOrigins.has(normalizedOrigin)
+      ) {
+        return callback(null, true);
+      }
+
+      console.warn(
+        `Blocked CORS origin: ${origin}`
+      );
+
+      return callback(null, false);
+    },
+  })
+);
+
+
+// ==================================================
+// MIDDLEWARE
+// ==================================================
+
 app.use(express.json());
 
 app.use((req, res, next) => {
@@ -49,29 +72,72 @@ app.use((req, res, next) => {
   next();
 });
 
+
+// ==================================================
+// ROUTES
+// ==================================================
+
 app.use("/api/auth", authRoutes);
+
 app.use("/api/mail", mailRoutes);
+
+
+// ==================================================
+// ROOT ROUTE
+// ==================================================
 
 app.get("/", (req, res) => {
   res.send("BulkMail API is running");
 });
 
+
+// ==================================================
+// HEALTH CHECK
+// ==================================================
+
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok" });
+  res.json({
+    status: "ok",
+  });
 });
 
-const PORT = process.env.PORT || 10000;
+
+// ==================================================
+// PORT
+// ==================================================
+
+const PORT =
+  process.env.PORT || 10000;
+
+
+// ==================================================
+// START SERVER
+// ==================================================
 
 async function startServer() {
   try {
-    await mongoose.connect(process.env.MONGO_URI);
-    console.log("Connected to MongoDB");
+    await mongoose.connect(
+      process.env.MONGO_URI
+    );
 
-    app.listen(PORT, () => {
-      console.log(`Server running at http://localhost:${PORT}`);
-    });
+    console.log(
+      "Connected to MongoDB"
+    );
+
+    app.listen(
+      PORT,
+      "0.0.0.0",
+      () => {
+        console.log(
+          `Server running on port ${PORT}`
+        );
+      }
+    );
   } catch (error) {
-    console.log("Could not connect to MongoDB:", error.message);
+    console.log(
+      "Could not connect to MongoDB:",
+      error.message
+    );
   }
 }
 
