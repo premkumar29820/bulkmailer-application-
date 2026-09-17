@@ -17,11 +17,6 @@ mongoose.set("strictQuery", true);
 
 const app = express();
 
-
-// ==================================================
-// CORS CONFIGURATION
-// ==================================================
-
 function normalizeOrigin(origin) {
   return origin.trim().replace(/\/$/, "");
 }
@@ -31,114 +26,53 @@ const configuredOrigins = (process.env.CLIENT_ORIGIN || "")
   .map(normalizeOrigin)
   .filter(Boolean);
 
-const allowedOrigins = new Set(configuredOrigins);
-
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // Allow requests without an origin
-      // such as Postman/server-to-server requests
-      if (!origin) {
-        return callback(null, true);
-      }
-
-      const normalizedOrigin =
-        normalizeOrigin(origin);
-
-      if (
-        allowedOrigins.has(normalizedOrigin)
-      ) {
-        return callback(null, true);
-      }
-
-      console.warn(
-        `Blocked CORS origin: ${origin}`
-      );
-
-      return callback(null, false);
-    },
-  })
-);
-
-
-// ==================================================
-// MIDDLEWARE
-// ==================================================
-
-app.use(express.json());
-
-app.use((req, res, next) => {
-  console.log(req.method, req.url);
-  next();
-});
-
-
-// ==================================================
-// ROUTES
-// ==================================================
-
-app.use("/api/auth", authRoutes);
-
-app.use("/api/mail", mailRoutes);
-
-
-// ==================================================
-// ROOT ROUTE
-// ==================================================
-
-app.get("/", (req, res) => {
-  res.send("BulkMail API is running");
-});
-
-
-// ==================================================
-// HEALTH CHECK
-// ==================================================
-
-app.get("/api/health", (req, res) => {
-  res.json({
-    status: "ok",
-  });
-});
-
-
-// ==================================================
-// PORT
-// ==================================================
-
-const PORT =
-  process.env.PORT || 10000;
-
-
-// ==================================================
-// START SERVER
-// ==================================================
-
-async function startServer() {
-  try {
-    await mongoose.connect(
-      process.env.MONGO_URI
-    );
-
-    console.log(
-      "Connected to MongoDB"
-    );
-
-    app.listen(
-      PORT,
-      "0.0.0.0",
-      () => {
-        console.log(
-          `Server running on port ${PORT}`
-        );
-      }
-    );
-  } catch (error) {
-    console.log(
-      "Could not connect to MongoDB:",
-      error.message
-    );
-  }
-}
-
-startServer();
+const allowedOrigins = new Set([
+  "http://localhost:3000",
+  "https://bulkmailer-2.vercel.app", 
+  ...configuredOrigins, 
+]); 
+ 
+app.use(cors({ 
+  origin: (origin, callback) => { 
+    if (!origin || allowedOrigins.has(normalizeOrigin(origin))) { 
+      return callback(null, true); 
+    } 
+ 
+    console.warn(`Blocked CORS origin: ${origin}`); 
+    return callback(null, false); 
+  }, 
+})); 
+app.use(express.json()); 
+ 
+app.use((req, res, next) => { 
+  console.log(req.method, req.url); 
+  next(); 
+}); 
+ 
+app.use("/api/auth", authRoutes); 
+app.use("/api/mail", mailRoutes); 
+ 
+app.get("/", (req, res) => { 
+  res.send("BulkMail API is running"); 
+}); 
+ 
+app.get("/api/health", (req, res) => { 
+  res.json({ status: "ok" }); 
+}); 
+ 
+const PORT = process.env.PORT || 10000; 
+ 
+async function startServer() { 
+  try { 
+    await mongoose.connect(process.env.MONGO_URI); 
+    console.log("Connected to MongoDB"); 
+ 
+    app.listen(PORT, () => { 
+      console.log(`Server running at http://localhost:${PORT}`); 
+    }); 
+  } catch (error) { 
+    console.log("Could not connect to MongoDB:", error.message); 
+  } 
+} 
+ 
+startServer()   
